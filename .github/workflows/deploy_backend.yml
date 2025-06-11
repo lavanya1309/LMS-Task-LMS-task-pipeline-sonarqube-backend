@@ -23,7 +23,7 @@ jobs:
 
     - name: Run SonarQube Scan
       env:
-        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       run: |
         npm install -g sonar-scanner
         sonar-scanner \
@@ -35,7 +35,7 @@ jobs:
     - name: Wait for Quality Gate result
       id: qualitygate
       env:
-        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       run: |
         echo "Waiting for SonarQube Quality Gate..."
         sleep 30
@@ -65,13 +65,12 @@ jobs:
 
           echo "Fixing directory permissions..."
           sudo mkdir -p /var/www/html
-          sudo chown -R ubuntu:ubuntu /var/www/html
-
+          sudo chown -R $USER:$USER /var/www/html
           cd /var/www/html
 
           if [ ! -d "LMS-Course-API" ]; then
             echo "Cloning repository for the first time..."
-            git clone git@github.com:vulture-lines/LMS-Course-API.git
+            git clone https://${{ secrets.GH_TOKEN }}@github.com/lavanya1309/LMS-Task-LMS-task-pipeline-sonarqube-backend.git LMS-Course-API
           fi
 
           cd LMS-Course-API
