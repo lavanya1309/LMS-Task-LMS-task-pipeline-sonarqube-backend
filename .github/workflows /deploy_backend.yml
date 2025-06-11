@@ -1,0 +1,92 @@
+name: Deploy Node.js Backend with SonarQube Quality Gate
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  analyze-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run SonarQube Scan
+      env:
+        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
+      run: |
+        npm install -g sonar-scanner
+        sonar-scanner \
+          -Dsonar.projectKey=LMS_Backend \
+          -Dsonar.sources=. \
+          -Dsonar.host.url=https://sonar.leran.xyz \
+          -Dsonar.login=$SONAR_TOKEN
+
+    - name: Wait for Quality Gate result
+      id: qualitygate
+      env:
+        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
+      run: |
+        echo "Waiting for SonarQube Quality Gate..."
+        sleep 30
+        STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonar.leran.xyz/api/qualitygates/project_status?projectKey=LMS_Backend" | jq -r '.projectStatus.status')
+        echo "Quality Gate Status: $STATUS"
+        echo "qualityGateStatus=$STATUS" >> $GITHUB_OUTPUT
+
+    - name: Check Quality Gate Result
+      run: |
+        echo "Quality Gate Status: ${{ steps.qualitygate.outputs.qualityGateStatus }}"
+        if [[ "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "OK" && "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "PASSED" ]]; then
+          echo "❌ SonarQube Quality Gate failed. Stopping deployment."
+          exit 1
+        fi
+
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_IP }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          echo "Updating packages and installing Node.js and PM2..."
+          sudo apt-get update
+          sudo apt-get install -y nodejs npm
+          sudo npm install -g pm2
+
+          echo "Fixing directory permissions..."
+          sudo mkdir -p /var/www/html
+          sudo chown -R ubuntu:ubuntu /var/www/html
+
+          cd /var/www/html
+
+          if [ ! -d "LMS-Course-API" ]; then
+            echo "Cloning repository for the first time..."
+            git clone git@github.com:vulture-lines/LMS-Course-API.git
+          fi
+
+          cd LMS-Course-API
+
+          echo "Resetting local changes and pulling latest code..."
+          git reset --hard
+          git pull origin main
+
+          echo "Installing dependencies..."
+          npm install
+
+          echo "Starting or restarting PM2 process..."
+          pm2 describe lms-backend > /dev/null
+          if [ $? -ne 0 ]; then
+            pm2 start server.js --name lms-backend
+          else
+            pm2 restart lms-backend
+          fi
